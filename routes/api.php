@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BranchController;
 use App\Http\Controllers\Api\InventoryRecordController;
 use App\Http\Controllers\Api\ItemController;
+use App\Http\Controllers\Api\CashCountController;
 use Illuminate\Support\Facades\Route;
 
 // Public
@@ -49,4 +50,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/inventory-records/{inventoryRecord}', [InventoryRecordController::class, 'update']);
         Route::delete('/inventory-records/{inventoryRecord}', [InventoryRecordController::class, 'destroy']);
     });
+
+    Route::get('/cash-counts', [CashCountController::class, 'show']);
+    Route::post('/cash-counts', [CashCountController::class, 'store']);
 });
