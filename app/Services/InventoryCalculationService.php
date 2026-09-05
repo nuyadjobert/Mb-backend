@@ -70,4 +70,29 @@ class InventoryCalculationService
             'total_sales' => round($totalSales, 2),
         ];
     }
+
+    public function validateDivisibility(float $usageQty, Item $item): ?string
+    {
+        $divisor = (float) $item->divisor;
+
+        if ($divisor <= 1) {
+            return null; // no constraint for items with no meaningful divisor
+        }
+
+        $remainder = fmod($usageQty, $divisor);
+
+        // Tolerate floating point noise (e.g. 0.999999999 vs 1)
+        $isDivisible = abs($remainder) < 0.001 || abs($remainder - $divisor) < 0.001;
+
+        if (! $isDivisible) {
+            return sprintf(
+                '"%s": usage quantity (%s) is not evenly divisible by %s. Please recheck Beginning/Del/Out/Ending.',
+                $item->name,
+                rtrim(rtrim(number_format($usageQty, 2), '0'), '.'),
+                rtrim(rtrim(number_format($divisor, 2), '0'), '.')
+            );
+        }
+
+        return null;
+    }
 }

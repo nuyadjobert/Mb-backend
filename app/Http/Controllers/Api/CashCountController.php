@@ -13,6 +13,7 @@ class CashCountController extends Controller
 {
     private const DENOMINATIONS = [1000, 500, 100, 50, 20, 10, 5, 1];
 
+    /** Fetch an existing cash count for a shift/date, if one was already submitted. */
     public function show(Request $request)
     {
         $authUser = $request->user();
@@ -105,6 +106,45 @@ class CashCountController extends Controller
         );
 
         return response()->json($cashCount, 201);
+    }
+
+    /**
+     * Crew's final approval after reviewing the summary. Locks in this
+     * shift's cash count as the approved version.
+     */
+    public function finalize(Request $request)
+    {
+        $authUser = $request->user();
+
+        $validated = $request->validate([
+            'shift_number' => 'required|integer|in:1,2,3',
+            'record_date' => 'required|date',
+            'branch_id' => 'nullable|exists:branches,id',
+            'finalized_by' => 'required|string|max:255',
+        ]);
+
+        $branchId = $this->resolveBranchId($authUser, $validated);
+        if ($branchId instanceof JsonResponse) {
+            return $branchId;
+        }
+
+        $cashCount = CashCount::where('branch_id', $branchId)
+            ->where('shift_number', $validated['shift_number'])
+            ->where('record_date', $validated['record_date'])
+            ->first();
+
+        if (! $cashCount) {
+            return response()->json([
+                'message' => 'Cash count not found for this shift. Please save it first.',
+            ], 404);
+        }
+
+        $cashCount->update([
+            'finalized_at' => now(),
+            'finalized_by' => $validated['finalized_by'],
+        ]);
+
+        return response()->json($cashCount);
     }
 
     /**

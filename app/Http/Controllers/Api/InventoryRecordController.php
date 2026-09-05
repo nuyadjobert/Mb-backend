@@ -10,7 +10,6 @@ use App\Models\User;
 use App\Services\InventoryCalculationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 
 class InventoryRecordController extends Controller
 {
@@ -69,7 +68,6 @@ class InventoryRecordController extends Controller
             'out_qty' => 'nullable|numeric|min:0',
             'ending_qty' => 'required|numeric|min:0',
             'beginning_qty' => 'nullable|numeric|min:0',
-            'beginning_override_reason' => 'nullable|string|max:255',
             'crew_name' => 'required|string|max:255',
             'notes' => 'nullable|string',
             'branch_id' => 'nullable|exists:branches,id',
@@ -94,20 +92,13 @@ class InventoryRecordController extends Controller
 
         $item = Item::findOrFail($validated['item_id']);
 
-        $autoBeginning = $this->calculator->resolveBeginningQty(
-            $branchId,
-            $item->id,
-            $validated['shift_number'],
-            $validated['record_date']
-        );
-
-        $beginningQty = $validated['beginning_qty'] ?? $autoBeginning;
-
-        if (abs($beginningQty - $autoBeginning) > 0.001 && empty($validated['beginning_override_reason'])) {
-            throw ValidationException::withMessages([
-                'beginning_override_reason' => ["A reason is required when correcting the beginning qty for \"{$item->name}\"."],
-            ]);
-        }
+        $beginningQty = $validated['beginning_qty']
+            ?? $this->calculator->resolveBeginningQty(
+                $branchId,
+                $item->id,
+                $validated['shift_number'],
+                $validated['record_date']
+            );
 
         $computed = $this->calculator->calculate([
             'beginning_qty' => $beginningQty,
@@ -115,6 +106,14 @@ class InventoryRecordController extends Controller
             'out_qty' => $validated['out_qty'] ?? 0,
             'ending_qty' => $validated['ending_qty'],
         ], $item);
+
+        $divisibilityError = $this->calculator->validateDivisibility((float) $computed['usage_qty'], $item);
+        if ($divisibilityError) {
+            return response()->json([
+                'message' => $divisibilityError,
+                'errors' => [$divisibilityError],
+            ], 422);
+        }
 
         $record = InventoryRecord::create([
             'branch_id' => $branchId,
@@ -124,8 +123,6 @@ class InventoryRecordController extends Controller
             'shift_number' => $validated['shift_number'],
             'record_date' => $validated['record_date'],
             'notes' => $validated['notes'] ?? null,
-            'beginning_qty_auto' => $autoBeginning,
-            'beginning_override_reason' => $validated['beginning_override_reason'] ?? null,
             ...$computed,
         ]);
 
@@ -156,7 +153,7 @@ class InventoryRecordController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
-        $items = Item::where('is_active', true)->orderBy('sort_order')->get();
+        $items = Item::where('is_active', true)->orderBy('name')->get();
 
         $existingRecords = InventoryRecord::where('branch_id', $branchId)
             ->where('shift_number', $validated['shift_number'])
@@ -210,7 +207,6 @@ class InventoryRecordController extends Controller
             'items.*.out_qty' => 'nullable|numeric|min:0',
             'items.*.ending_qty' => 'required|numeric|min:0',
             'items.*.beginning_qty' => 'nullable|numeric|min:0',
-            'items.*.beginning_override_reason' => 'nullable|string|max:255',
         ]);
 
         $userId = null;
@@ -230,33 +226,50 @@ class InventoryRecordController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
-        $records = DB::transaction(function () use ($validated, $branchId, $userId) {
-            $saved = [];
+        // Dry-run: compute every row's usage first and validate divisibility
+        // BEFORE writing anything, so a bad row never causes a half-saved shift.
+        $prepared = [];
+        $divisibilityErrors = [];
 
-            foreach ($validated['items'] as $row) {
-                $item = Item::findOrFail($row['item_id']);
+        foreach ($validated['items'] as $row) {
+            $item = Item::findOrFail($row['item_id']);
 
-                $autoBeginning = $this->calculator->resolveBeginningQty(
+            $beginningQty = $row['beginning_qty']
+                ?? $this->calculator->resolveBeginningQty(
                     $branchId,
                     $item->id,
                     $validated['shift_number'],
                     $validated['record_date']
                 );
 
-                $beginningQty = $row['beginning_qty'] ?? $autoBeginning;
+            $computed = $this->calculator->calculate([
+                'beginning_qty' => $beginningQty,
+                'del_qty' => $row['del_qty'] ?? 0,
+                'out_qty' => $row['out_qty'] ?? 0,
+                'ending_qty' => $row['ending_qty'],
+            ], $item);
 
-                if (abs($beginningQty - $autoBeginning) > 0.001 && empty($row['beginning_override_reason'])) {
-                    throw ValidationException::withMessages([
-                        'items' => ["A reason is required when correcting the beginning qty for \"{$item->name}\"."],
-                    ]);
-                }
+            $error = $this->calculator->validateDivisibility((float) $computed['usage_qty'], $item);
+            if ($error) {
+                $divisibilityErrors[] = $error;
+            }
 
-                $computed = $this->calculator->calculate([
-                    'beginning_qty' => $beginningQty,
-                    'del_qty' => $row['del_qty'] ?? 0,
-                    'out_qty' => $row['out_qty'] ?? 0,
-                    'ending_qty' => $row['ending_qty'],
-                ], $item);
+            $prepared[] = ['item' => $item, 'computed' => $computed];
+        }
+
+        if (! empty($divisibilityErrors)) {
+            return response()->json([
+                'message' => 'Some items have invalid quantities and were not saved.',
+                'errors' => $divisibilityErrors,
+            ], 422);
+        }
+
+        $records = DB::transaction(function () use ($prepared, $validated, $branchId, $userId) {
+            $saved = [];
+
+            foreach ($prepared as $entry) {
+                $item = $entry['item'];
+                $computed = $entry['computed'];
 
                 $record = InventoryRecord::updateOrCreate(
                     [
@@ -268,8 +281,6 @@ class InventoryRecordController extends Controller
                     [
                         'user_id' => $userId,
                         'crew_name' => $validated['crew_name'],
-                        'beginning_qty_auto' => $autoBeginning,
-                        'beginning_override_reason' => $row['beginning_override_reason'] ?? null,
                         ...$computed,
                     ]
                 );
@@ -292,6 +303,21 @@ class InventoryRecordController extends Controller
 
     public function checkShift(Request $request)
     {
+        $authUser = $request->user();
+
+        $isHeadCrew = $authUser instanceof Branch
+            && $authUser->currentAccessToken()
+            && $authUser->currentAccessToken()->can('head_crew');
+
+        $isAdminOrManager = $authUser instanceof User
+            && ($authUser->isAdmin() || $authUser->isManager());
+
+        if (! $isHeadCrew && ! $isAdminOrManager) {
+            return response()->json([
+                'message' => 'Only Head Crew or Management can check shift submissions.',
+            ], 403);
+        }
+
         $validated = $request->validate([
             'shift_number' => 'required|integer|in:1,2,3',
             'record_date' => 'required|date',
@@ -299,33 +325,37 @@ class InventoryRecordController extends Controller
             'branch_id' => 'nullable|exists:branches,id',
         ]);
 
-        $authUser = $request->user();
+        $branchId = $authUser instanceof Branch
+            ? $authUser->id
+            : ($validated['branch_id'] ?? $authUser->branch_id);
 
-        if ($authUser instanceof Branch) {
-            $branchId = $authUser->id;
-        } elseif ($authUser instanceof User) {
-            $branchId = $validated['branch_id'] ?? $authUser->branch_id;
-            if (! $branchId) {
-                return response()->json(['message' => 'branch_id is required.'], 422);
-            }
-        } else {
-            return response()->json(['message' => 'Unauthorized.'], 403);
+        if (! $branchId) {
+            return response()->json(['message' => 'branch_id is required.'], 422);
         }
 
         $updated = InventoryRecord::where('branch_id', $branchId)
             ->where('shift_number', $validated['shift_number'])
-            ->whereDate('record_date', $validated['record_date'])
+            ->where('record_date', $validated['record_date'])
             ->update([
                 'status' => 'checked',
                 'checked_by' => $validated['checked_by'],
                 'checked_at' => now(),
             ]);
 
-        if ($updated === 0) {
-            return response()->json(['message' => 'No records found for this shift/date.'], 404);
-        }
+        $records = InventoryRecord::with('item')
+            ->where('branch_id', $branchId)
+            ->where('shift_number', $validated['shift_number'])
+            ->where('record_date', $validated['record_date'])
+            ->get();
 
-        return response()->json(['message' => "Checked {$updated} record(s).", 'checked_count' => $updated]);
+        return response()->json([
+            'branch_id' => $branchId,
+            'shift_number' => $validated['shift_number'],
+            'record_date' => $validated['record_date'],
+            'checked_count' => $updated,
+            'records' => $records,
+            'shift_total_sales' => round($records->sum('total_sales'), 2),
+        ]);
     }
 
     public function show(InventoryRecord $inventoryRecord)
@@ -351,6 +381,14 @@ class InventoryRecordController extends Controller
             'out_qty' => $validated['out_qty'] ?? $inventoryRecord->out_qty,
             'ending_qty' => $validated['ending_qty'] ?? $inventoryRecord->ending_qty,
         ], $item);
+
+        $divisibilityError = $this->calculator->validateDivisibility((float) $computed['usage_qty'], $item);
+        if ($divisibilityError) {
+            return response()->json([
+                'message' => $divisibilityError,
+                'errors' => [$divisibilityError],
+            ], 422);
+        }
 
         $inventoryRecord->update([
             'notes' => $validated['notes'] ?? $inventoryRecord->notes,

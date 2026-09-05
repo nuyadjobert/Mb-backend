@@ -51,6 +51,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/inventory-records/{inventoryRecord}', [InventoryRecordController::class, 'destroy']);
     });
 
+    // Cash count - denomination breakdown submitted right after a shift is confirmed
     Route::get('/cash-counts', [CashCountController::class, 'show']);
     Route::post('/cash-counts', [CashCountController::class, 'store']);
+    Route::post('/cash-counts/finalize', [CashCountController::class, 'finalize']);
 });

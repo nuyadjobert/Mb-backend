@@ -29,6 +29,8 @@ class CashCount extends Model
         'net_cash',
         'crew_name',
         'notes',
+        'finalized_at',
+        'finalized_by',
     ];
 
     protected $casts = [
@@ -38,6 +40,7 @@ class CashCount extends Model
         'total_cash' => 'decimal:2',
         'total_expenses' => 'decimal:2',
         'net_cash' => 'decimal:2',
+        'finalized_at' => 'datetime',
     ];
 
     public function branch(): BelongsTo

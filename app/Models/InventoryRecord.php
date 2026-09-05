@@ -35,14 +35,14 @@ class InventoryRecord extends Model
     protected $casts = [
         'record_date' => 'date',
         'checked_at' => 'datetime',
-        'beginning_qty' => 'decimal:2',
-        'beginning_qty_auto' => 'decimal:2',
-        'del_qty' => 'decimal:2',
-        'out_qty' => 'decimal:2',
-        'ending_qty' => 'decimal:2',
-        'usage_qty' => 'decimal:2',
-        'total_order' => 'decimal:2',
-        'total_sales' => 'decimal:2',
+        'beginning_qty' => 'integer',
+        'beginning_qty_auto' => 'integer',
+        'del_qty' => 'integer',
+        'out_qty' => 'integer',
+        'ending_qty' => 'integer',
+        'usage_qty' => 'integer',
+        'total_order' => 'integer',
+        'total_sales' => 'integer',
     ];
 
     public function branch(): BelongsTo
