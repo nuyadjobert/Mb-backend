@@ -10,7 +10,7 @@ class ItemController extends Controller
 {
     public function index()
     {
-        return response()->json(Item::orderBy('name')->get());
+        return response()->json(Item::orderBy('sort_order')->orderBy('name')->get());
     }
 
     public function store(Request $request)
@@ -20,6 +20,7 @@ class ItemController extends Controller
             'unit' => 'nullable|string|max:50',
             'price' => 'required|numeric|min:0',
             'divisor' => 'nullable|numeric|min:0.01',
+            'sort_order' => 'nullable|integer',
             'is_active' => 'boolean',
         ]);
 
@@ -40,6 +41,7 @@ class ItemController extends Controller
             'unit' => 'nullable|string|max:50',
             'price' => 'sometimes|required|numeric|min:0',
             'divisor' => 'nullable|numeric|min:0.01',
+            'sort_order' => 'nullable|integer',
             'is_active' => 'boolean',
         ]);
 

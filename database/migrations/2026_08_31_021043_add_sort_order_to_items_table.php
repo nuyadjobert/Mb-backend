@@ -8,15 +8,19 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('items', function (Blueprint $table) {
-            $table->integer('sort_order')->default(0)->after('name');
-        });
+        if (! Schema::hasColumn('items', 'sort_order')) {
+            Schema::table('items', function (Blueprint $table) {
+                $table->integer('sort_order')->default(0)->after('name');
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('items', function (Blueprint $table) {
-            $table->dropColumn('sort_order');
-        });
+        if (Schema::hasColumn('items', 'sort_order')) {
+            Schema::table('items', function (Blueprint $table) {
+                $table->dropColumn('sort_order');
+            });
+        }
     }
 };

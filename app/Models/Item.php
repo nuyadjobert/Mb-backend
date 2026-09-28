@@ -12,6 +12,7 @@ class Item extends Model
 
     protected $fillable = [
         'name',
+        'sort_order',
         'unit',
         'price',
         'divisor',
@@ -22,6 +23,7 @@ class Item extends Model
         'price' => 'decimal:2',
         'divisor' => 'decimal:2',
         'is_active' => 'boolean',
+        'sort_order' => 'integer',
     ];
 
     public function inventoryRecords(): HasMany
