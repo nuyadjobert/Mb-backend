@@ -47,8 +47,10 @@ class InventoryRecordController extends Controller
             $query->where('status', $request->status);
         }
 
-        $records = $query->orderBy('record_date', 'desc')
+        $records = $query
+            ->orderBy('record_date', 'desc')
             ->orderBy('shift_number')
+            ->orderBy('item_id', 'asc')
             ->paginate(20);
 
         return response()->json($records);

@@ -95,4 +95,31 @@ class InventoryCalculationService
 
         return null;
     }
+
+    public function validateEndingQty(
+    float $beginningQty,
+    float $endingQty,
+    Item $item
+): ?string {
+    // Ending quantity cannot be negative
+    if ($endingQty < 0) {
+        return sprintf(
+            '"%s": ending quantity (%s) cannot be less than 0.',
+            $item->name,
+            rtrim(rtrim(number_format($endingQty, 2), '0'), '.')
+        );
+    }
+
+    // Ending quantity cannot be greater than beginning quantity
+    if ($endingQty > $beginningQty) {
+        return sprintf(
+            '"%s": ending quantity (%s) cannot be greater than beginning quantity (%s).',
+            $item->name,
+            rtrim(rtrim(number_format($endingQty, 2), '0'), '.'),
+            rtrim(rtrim(number_format($beginningQty, 2), '0'), '.')
+        );
+    }
+
+    return null;
+}
 }
