@@ -13,9 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 class InventoryRecordController extends Controller
 {
-    public function __construct(protected InventoryCalculationService $calculator)
-    {
-    }
+    public function __construct(protected InventoryCalculationService $calculator) {}
 
     public function index(Request $request)
     {
@@ -153,7 +151,10 @@ class InventoryRecordController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
-        $items = Item::where('is_active', true)->orderBy('name')->get();
+        // Keep the same order as the items table
+        $items = Item::where('is_active', true)
+            ->orderBy('id', 'asc')
+            ->get();
 
         $existingRecords = InventoryRecord::where('branch_id', $branchId)
             ->where('shift_number', $validated['shift_number'])

@@ -10,7 +10,9 @@ class ItemController extends Controller
 {
     public function index()
     {
-        return response()->json(Item::orderBy('sort_order')->orderBy('name')->get());
+        return response()->json(
+            Item::orderBy('id', 'asc')->get()
+        );
     }
 
     public function store(Request $request)
