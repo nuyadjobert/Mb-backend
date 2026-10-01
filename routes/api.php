@@ -38,21 +38,92 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/items/{item}', [ItemController::class, 'destroy']);
     });
 
-    // Inventory records - store token (crew) or admin/manager can create/view,
-    // only admin/manager can edit/delete
-    Route::get('/inventory-records/shift-preview', [InventoryRecordController::class, 'shiftPreview']);
-    Route::post('/inventory-records/bulk', [InventoryRecordController::class, 'storeBulk']);
-    Route::post('/inventory-records/check-shift', [InventoryRecordController::class, 'checkShift']);
-    Route::get('/inventory-records', [InventoryRecordController::class, 'index']);
-    Route::post('/inventory-records', [InventoryRecordController::class, 'store']);
-    Route::get('/inventory-records/{inventoryRecord}', [InventoryRecordController::class, 'show']);
+    // Inventory records
+    Route::get(
+        '/inventory-records/shift-preview',
+        [InventoryRecordController::class, 'shiftPreview']
+    );
+
+    Route::post(
+        '/inventory-records/bulk',
+        [InventoryRecordController::class, 'storeBulk']
+    );
+
+    Route::post(
+        '/inventory-records/check-shift',
+        [InventoryRecordController::class, 'checkShift']
+    );
+
+    /*
+|--------------------------------------------------------------------------
+| Head Crew individual review
+|--------------------------------------------------------------------------
+*/
+
+    Route::post(
+        '/inventory-records/{inventoryRecord}/check',
+        [InventoryRecordController::class, 'checkRecord']
+    );
+
+    Route::put(
+        '/inventory-records/{inventoryRecord}/head-crew-edit',
+        [InventoryRecordController::class, 'headCrewEdit']
+    );
+
+    Route::get(
+        '/inventory-records',
+        [InventoryRecordController::class, 'index']
+    );
+
+    Route::post(
+        '/inventory-records',
+        [InventoryRecordController::class, 'store']
+    );
+
+    Route::get(
+        '/inventory-records/{inventoryRecord}',
+        [InventoryRecordController::class, 'show']
+    );
+
     Route::middleware('role:admin,manager')->group(function () {
-        Route::put('/inventory-records/{inventoryRecord}', [InventoryRecordController::class, 'update']);
-        Route::delete('/inventory-records/{inventoryRecord}', [InventoryRecordController::class, 'destroy']);
+
+        Route::put(
+            '/inventory-records/{inventoryRecord}',
+            [InventoryRecordController::class, 'update']
+        );
+
+        Route::delete(
+            '/inventory-records/{inventoryRecord}',
+            [InventoryRecordController::class, 'destroy']
+        );
     });
 
     // Cash count - denomination breakdown submitted right after a shift is confirmed
-    Route::get('/cash-counts', [CashCountController::class, 'show']);
-    Route::post('/cash-counts', [CashCountController::class, 'store']);
-    Route::post('/cash-counts/finalize', [CashCountController::class, 'finalize']);
+    // Cash count
+    Route::get(
+        '/cash-counts',
+        [CashCountController::class, 'show']
+    );
+
+    Route::post(
+        '/cash-counts',
+        [CashCountController::class, 'store']
+    );
+
+    // Head Crew cash count review
+    Route::get(
+        '/cash-counts/review',
+        [CashCountController::class, 'review']
+    );
+
+    Route::put(
+        '/cash-counts/review',
+        [CashCountController::class, 'reviewUpdate']
+    );
+
+    // Existing finalization
+    Route::post(
+        '/cash-counts/finalize',
+        [CashCountController::class, 'finalize']
+    );
 });

@@ -13,48 +13,82 @@ use Illuminate\Support\Facades\DB;
 
 class InventoryRecordController extends Controller
 {
-    public function __construct(protected InventoryCalculationService $calculator) {}
+    public function __construct(
+        protected InventoryCalculationService $calculator
+    ) {}
+
+    // ============================================================
+    // LIST RECORDS
+    // ============================================================
 
     public function index(Request $request)
     {
-        $query = InventoryRecord::with(['item', 'branch', 'user']);
+        $query = InventoryRecord::with([
+            'item',
+            'branch',
+            'user',
+        ]);
 
         $authUser = $request->user();
 
         if ($authUser instanceof Branch) {
+
             $query->where('branch_id', $authUser->id);
         } elseif ($authUser instanceof User) {
+
             if (! $authUser->isAdmin()) {
                 $query->where('branch_id', $authUser->branch_id);
             } elseif ($request->filled('branch_id')) {
-                $query->where('branch_id', $request->branch_id);
+                $query->where(
+                    'branch_id',
+                    $request->branch_id
+                );
             }
         }
 
         if ($request->filled('item_id')) {
-            $query->where('item_id', $request->item_id);
+            $query->where(
+                'item_id',
+                $request->item_id
+            );
         }
 
         if ($request->filled('shift_number')) {
-            $query->where('shift_number', $request->shift_number);
+            $query->where(
+                'shift_number',
+                $request->shift_number
+            );
         }
 
         if ($request->filled('record_date')) {
-            $query->whereDate('record_date', $request->record_date);
+            $query->whereDate(
+                'record_date',
+                $request->record_date
+            );
         }
 
         if ($request->filled('status')) {
-            $query->where('status', $request->status);
+            $query->where(
+                'status',
+                $request->status
+            );
         }
 
         $records = $query
             ->orderBy('record_date', 'desc')
             ->orderBy('shift_number')
             ->orderBy('item_id', 'asc')
-            ->paginate(20);
+            ->get();
 
-        return response()->json($records);
+        return response()->json([
+            'data' => $records,
+            'total' => $records->count(),
+        ]);
     }
+
+    // ============================================================
+    // CREATE SINGLE RECORD
+    // ============================================================
 
     public function store(Request $request)
     {
@@ -64,35 +98,53 @@ class InventoryRecordController extends Controller
             'item_id' => 'required|exists:items,id',
             'shift_number' => 'required|integer|in:1,2,3',
             'record_date' => 'required|date',
+
             'del_qty' => 'nullable|numeric|min:0',
             'out_qty' => 'nullable|numeric|min:0',
             'ending_qty' => 'required|numeric|min:0',
             'beginning_qty' => 'nullable|numeric|min:0',
+
             'crew_name' => 'required|string|max:255',
             'notes' => 'nullable|string',
+
             'branch_id' => 'nullable|exists:branches,id',
         ]);
 
         $userId = null;
 
         if ($authUser instanceof Branch) {
+
             $branchId = $authUser->id;
-        } elseif ($authUser instanceof User && ($authUser->isAdmin() || $authUser->isManager())) {
-            $branchId = $validated['branch_id'] ?? $authUser->branch_id;
+        } elseif (
+            $authUser instanceof User &&
+            ($authUser->isAdmin() || $authUser->isManager())
+        ) {
+
+            $branchId =
+                $validated['branch_id']
+                ?? $authUser->branch_id;
+
             $userId = $authUser->id;
 
             if (! $branchId) {
                 return response()->json([
-                    'message' => 'branch_id is required when submitting as admin/manager without an assigned branch.',
+                    'message' =>
+                    'branch_id is required when submitting as admin/manager without an assigned branch.',
                 ], 422);
             }
         } else {
-            return response()->json(['message' => 'Unauthorized.'], 403);
+
+            return response()->json([
+                'message' => 'Unauthorized.',
+            ], 403);
         }
 
-        $item = Item::findOrFail($validated['item_id']);
+        $item = Item::findOrFail(
+            $validated['item_id']
+        );
 
-        $beginningQty = $validated['beginning_qty']
+        $beginningQty =
+            $validated['beginning_qty']
             ?? $this->calculator->resolveBeginningQty(
                 $branchId,
                 $item->id,
@@ -107,7 +159,12 @@ class InventoryRecordController extends Controller
             'ending_qty' => $validated['ending_qty'],
         ], $item);
 
-        $divisibilityError = $this->calculator->validateDivisibility((float) $computed['usage_qty'], $item);
+        $divisibilityError =
+            $this->calculator->validateDivisibility(
+                (float) $computed['usage_qty'],
+                $item
+            );
+
         if ($divisibilityError) {
             return response()->json([
                 'message' => $divisibilityError,
@@ -119,15 +176,30 @@ class InventoryRecordController extends Controller
             'branch_id' => $branchId,
             'item_id' => $item->id,
             'user_id' => $userId,
+
             'crew_name' => $validated['crew_name'],
+
             'shift_number' => $validated['shift_number'],
             'record_date' => $validated['record_date'],
+
             'notes' => $validated['notes'] ?? null,
+
             ...$computed,
         ]);
 
-        return response()->json($record->load(['item', 'branch', 'user']), 201);
+        return response()->json(
+            $record->load([
+                'item',
+                'branch',
+                'user',
+            ]),
+            201
+        );
     }
+
+    // ============================================================
+    // SHIFT PREVIEW
+    // ============================================================
 
     public function shiftPreview(Request $request)
     {
@@ -140,52 +212,77 @@ class InventoryRecordController extends Controller
         ]);
 
         if ($authUser instanceof Branch) {
+
             $branchId = $authUser->id;
         } elseif ($authUser instanceof User) {
-            $branchId = ($authUser->isAdmin() && $request->filled('branch_id'))
+
+            $branchId =
+                ($authUser->isAdmin() && $request->filled('branch_id'))
                 ? $validated['branch_id']
                 : $authUser->branch_id;
 
             if (! $branchId) {
-                return response()->json(['message' => 'branch_id is required.'], 422);
+                return response()->json([
+                    'message' => 'branch_id is required.',
+                ], 422);
             }
         } else {
-            return response()->json(['message' => 'Unauthorized.'], 403);
+
+            return response()->json([
+                'message' => 'Unauthorized.',
+            ], 403);
         }
 
-        // Keep the same order as the items table
         $items = Item::where('is_active', true)
             ->orderBy('id', 'asc')
             ->get();
 
-        $existingRecords = InventoryRecord::where('branch_id', $branchId)
-            ->where('shift_number', $validated['shift_number'])
-            ->where('record_date', $validated['record_date'])
+        $existingRecords = InventoryRecord::where(
+            'branch_id',
+            $branchId
+        )
+            ->where(
+                'shift_number',
+                $validated['shift_number']
+            )
+            ->where(
+                'record_date',
+                $validated['record_date']
+            )
             ->get()
             ->keyBy('item_id');
 
-        $preview = $items->map(function (Item $item) use ($branchId, $validated, $existingRecords) {
-            $existing = $existingRecords->get($item->id);
+        $preview = $items->map(
+            function (Item $item)
+            use (
+                $branchId,
+                $validated,
+                $existingRecords
+            ) {
 
-            $beginningQty = $existing
-                ? (float) $existing->beginning_qty
-                : $this->calculator->resolveBeginningQty(
-                    $branchId,
-                    $item->id,
-                    $validated['shift_number'],
-                    $validated['record_date']
-                );
+                $existing =
+                    $existingRecords->get($item->id);
 
-            return [
-                'item_id' => $item->id,
-                'item_name' => $item->name,
-                'unit' => $item->unit,
-                'price' => (float) $item->price,
-                'divisor' => (float) $item->divisor,
-                'beginning_qty' => $beginningQty,
-                'existing_record' => $existing,
-            ];
-        });
+                $beginningQty = $existing
+                    ? (float) $existing->beginning_qty
+                    : $this->calculator->resolveBeginningQty(
+                        $branchId,
+                        $item->id,
+                        $validated['shift_number'],
+                        $validated['record_date']
+                    );
+
+                return [
+                    'item_id' => $item->id,
+                    'item_name' => $item->name,
+                    'unit' => $item->unit,
+                    'price' => (float) $item->price,
+                    'divisor' => (float) $item->divisor,
+                    'beginning_qty' => $beginningQty,
+                    'existing_record' => $existing,
+                ];
+            }
+        );
 
         return response()->json([
             'branch_id' => $branchId,
@@ -194,6 +291,10 @@ class InventoryRecordController extends Controller
             'items' => $preview,
         ]);
     }
+
+    // ============================================================
+    // SUBMIT WHOLE SHIFT
+    // ============================================================
 
     public function storeBulk(Request $request)
     {
@@ -204,40 +305,65 @@ class InventoryRecordController extends Controller
             'record_date' => 'required|date',
             'crew_name' => 'required|string|max:255',
             'branch_id' => 'nullable|exists:branches,id',
+
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id|distinct',
-            'items.*.del_qty' => 'nullable|numeric|min:0',
-            'items.*.out_qty' => 'nullable|numeric|min:0',
-            'items.*.ending_qty' => 'required|numeric|min:0',
-            'items.*.beginning_qty' => 'nullable|numeric|min:0',
+
+            'items.*.item_id' =>
+            'required|exists:items,id|distinct',
+
+            'items.*.del_qty' =>
+            'nullable|numeric|min:0',
+
+            'items.*.out_qty' =>
+            'nullable|numeric|min:0',
+
+            'items.*.ending_qty' =>
+            'required|numeric|min:0',
+
+            'items.*.beginning_qty' =>
+            'nullable|numeric|min:0',
         ]);
 
         $userId = null;
 
         if ($authUser instanceof Branch) {
+
             $branchId = $authUser->id;
-        } elseif ($authUser instanceof User && ($authUser->isAdmin() || $authUser->isManager())) {
-            $branchId = $validated['branch_id'] ?? $authUser->branch_id;
+        } elseif (
+            $authUser instanceof User &&
+            ($authUser->isAdmin() || $authUser->isManager())
+        ) {
+
+            $branchId =
+                $validated['branch_id']
+                ?? $authUser->branch_id;
+
             $userId = $authUser->id;
 
             if (! $branchId) {
                 return response()->json([
-                    'message' => 'branch_id is required when submitting as admin/manager without an assigned branch.',
+                    'message' =>
+                    'branch_id is required when submitting as admin/manager without an assigned branch.',
                 ], 422);
             }
         } else {
-            return response()->json(['message' => 'Unauthorized.'], 403);
+
+            return response()->json([
+                'message' => 'Unauthorized.',
+            ], 403);
         }
 
-        // Dry-run: compute every row's usage first and validate divisibility
-        // BEFORE writing anything, so a bad row never causes a half-saved shift.
         $prepared = [];
         $divisibilityErrors = [];
 
         foreach ($validated['items'] as $row) {
-            $item = Item::findOrFail($row['item_id']);
 
-            $beginningQty = $row['beginning_qty']
+            $item = Item::findOrFail(
+                $row['item_id']
+            );
+
+            $beginningQty =
+                $row['beginning_qty']
                 ?? $this->calculator->resolveBeginningQty(
                     $branchId,
                     $item->id,
@@ -252,140 +378,515 @@ class InventoryRecordController extends Controller
                 'ending_qty' => $row['ending_qty'],
             ], $item);
 
-            $error = $this->calculator->validateDivisibility((float) $computed['usage_qty'], $item);
+            $error =
+                $this->calculator->validateDivisibility(
+                    (float) $computed['usage_qty'],
+                    $item
+                );
+
             if ($error) {
                 $divisibilityErrors[] = $error;
             }
 
-            $prepared[] = ['item' => $item, 'computed' => $computed];
+            $prepared[] = [
+                'item' => $item,
+                'computed' => $computed,
+            ];
         }
 
         if (! empty($divisibilityErrors)) {
+
             return response()->json([
-                'message' => 'Some items have invalid quantities and were not saved.',
+                'message' =>
+                'Some items have invalid quantities and were not saved.',
                 'errors' => $divisibilityErrors,
             ], 422);
         }
 
-        $records = DB::transaction(function () use ($prepared, $validated, $branchId, $userId) {
-            $saved = [];
+        $records = DB::transaction(
+            function ()
+            use (
+                $prepared,
+                $validated,
+                $branchId,
+                $userId
+            ) {
 
-            foreach ($prepared as $entry) {
-                $item = $entry['item'];
-                $computed = $entry['computed'];
+                $saved = [];
 
-                $record = InventoryRecord::updateOrCreate(
-                    [
-                        'branch_id' => $branchId,
-                        'item_id' => $item->id,
-                        'shift_number' => $validated['shift_number'],
-                        'record_date' => $validated['record_date'],
-                    ],
-                    [
-                        'user_id' => $userId,
-                        'crew_name' => $validated['crew_name'],
-                        ...$computed,
-                    ]
-                );
+                foreach ($prepared as $entry) {
 
-                $saved[] = $record->load('item');
+                    $item = $entry['item'];
+                    $computed = $entry['computed'];
+
+                    $record =
+                        InventoryRecord::updateOrCreate(
+                            [
+                                'branch_id' => $branchId,
+                                'item_id' => $item->id,
+                                'shift_number' =>
+                                $validated['shift_number'],
+                                'record_date' =>
+                                $validated['record_date'],
+                            ],
+                            [
+                                'user_id' => $userId,
+                                'crew_name' =>
+                                $validated['crew_name'],
+
+                                ...$computed,
+                            ]
+                        );
+
+                    $saved[] =
+                        $record->load('item');
+                }
+
+                return $saved;
             }
-
-            return $saved;
-        });
+        );
 
         return response()->json([
             'branch_id' => $branchId,
-            'shift_number' => $validated['shift_number'],
-            'record_date' => $validated['record_date'],
-            'crew_name' => $validated['crew_name'],
+            'shift_number' =>
+            $validated['shift_number'],
+            'record_date' =>
+            $validated['record_date'],
+            'crew_name' =>
+            $validated['crew_name'],
+
             'records' => $records,
-            'shift_total_sales' => round(collect($records)->sum('total_sales'), 2),
+
+            'shift_total_sales' =>
+            round(
+                collect($records)
+                    ->sum('total_sales'),
+                2
+            ),
         ], 201);
     }
+
+    // ============================================================
+    // CHECK ONE RECORD
+    // ============================================================
+
+    public function checkRecord(
+        Request $request,
+        InventoryRecord $inventoryRecord
+    ) {
+        $authUser = $request->user();
+
+        $isHeadCrew =
+            $authUser instanceof Branch
+            && $authUser->currentAccessToken()
+            && $authUser
+            ->currentAccessToken()
+            ->can('head_crew');
+
+        $isAdminOrManager =
+            $authUser instanceof User
+            && (
+                $authUser->isAdmin()
+                || $authUser->isManager()
+            );
+
+        if (! $isHeadCrew && ! $isAdminOrManager) {
+            return response()->json([
+                'message' =>
+                'Only Head Crew or Management can check inventory records.',
+            ], 403);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Branch protection
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            $authUser instanceof Branch
+            && $inventoryRecord->branch_id !== $authUser->id
+        ) {
+            return response()->json([
+                'message' =>
+                'You cannot check a record from another branch.',
+            ], 403);
+        }
+
+        if (
+            $authUser instanceof User
+            && ! $authUser->isAdmin()
+            && $inventoryRecord->branch_id !== $authUser->branch_id
+        ) {
+            return response()->json([
+                'message' =>
+                'You cannot check a record from another branch.',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'checked_by' =>
+            'required|string|max:255',
+        ]);
+
+        $inventoryRecord->update([
+            'status' => 'checked',
+            'checked_by' => $validated['checked_by'],
+            'checked_at' => now(),
+        ]);
+
+        return response()->json([
+            'message' =>
+            'Inventory record checked successfully.',
+
+            'record' =>
+            $inventoryRecord
+                ->fresh()
+                ->load([
+                    'item',
+                    'branch',
+                    'user',
+                ]),
+        ]);
+    }
+
+    // ============================================================
+    // HEAD CREW EDIT + CHECK ONE RECORD
+    // ============================================================
+
+    public function headCrewEdit(
+        Request $request,
+        InventoryRecord $inventoryRecord
+    ) {
+        $authUser = $request->user();
+
+        $isHeadCrew =
+            $authUser instanceof Branch
+            && $authUser->currentAccessToken()
+            && $authUser
+            ->currentAccessToken()
+            ->can('head_crew');
+
+        $isAdminOrManager =
+            $authUser instanceof User
+            && (
+                $authUser->isAdmin()
+                || $authUser->isManager()
+            );
+
+        if (! $isHeadCrew && ! $isAdminOrManager) {
+            return response()->json([
+                'message' =>
+                'Only Head Crew or Management can edit inventory records.',
+            ], 403);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Branch protection
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            $authUser instanceof Branch
+            && $inventoryRecord->branch_id !== $authUser->id
+        ) {
+            return response()->json([
+                'message' =>
+                'You cannot edit a record from another branch.',
+            ], 403);
+        }
+
+        if (
+            $authUser instanceof User
+            && ! $authUser->isAdmin()
+            && $inventoryRecord->branch_id !== $authUser->branch_id
+        ) {
+            return response()->json([
+                'message' =>
+                'You cannot edit a record from another branch.',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'beginning_qty' =>
+            'required|numeric|min:0',
+
+            'del_qty' =>
+            'required|numeric|min:0',
+
+            'out_qty' =>
+            'required|numeric|min:0',
+
+            'ending_qty' =>
+            'required|numeric|min:0',
+
+            'reason' =>
+            'required|string|min:1|max:1000',
+
+            'checked_by' =>
+            'required|string|max:255',
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Calculate new inventory values
+        |--------------------------------------------------------------------------
+        */
+
+        $item = $inventoryRecord->item;
+
+        $computed = $this->calculator->calculate([
+            'beginning_qty' =>
+            $validated['beginning_qty'],
+
+            'del_qty' =>
+            $validated['del_qty'],
+
+            'out_qty' =>
+            $validated['out_qty'],
+
+            'ending_qty' =>
+            $validated['ending_qty'],
+        ], $item);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Validate divisibility
+        |--------------------------------------------------------------------------
+        */
+
+        $divisibilityError =
+            $this->calculator->validateDivisibility(
+                (float) $computed['usage_qty'],
+                $item
+            );
+
+        if ($divisibilityError) {
+            return response()->json([
+                'message' => $divisibilityError,
+                'errors' => [$divisibilityError],
+            ], 422);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Save edit + confirm record
+        |--------------------------------------------------------------------------
+        */
+
+        $inventoryRecord->update([
+
+            'status' => 'checked',
+
+            'checked_by' =>
+            $validated['checked_by'],
+
+            'checked_at' => now(),
+
+            'notes' =>
+            $validated['reason'],
+
+            ...$computed,
+        ]);
+
+        return response()->json([
+            'message' =>
+            'Inventory record updated and confirmed successfully.',
+
+            'record' =>
+            $inventoryRecord
+                ->fresh()
+                ->load([
+                    'item',
+                    'branch',
+                    'user',
+                ]),
+        ]);
+    }
+
+    // ============================================================
+    // CHECK WHOLE SHIFT
+    // ============================================================
 
     public function checkShift(Request $request)
     {
         $authUser = $request->user();
 
-        $isHeadCrew = $authUser instanceof Branch
+        $isHeadCrew =
+            $authUser instanceof Branch
             && $authUser->currentAccessToken()
-            && $authUser->currentAccessToken()->can('head_crew');
+            && $authUser
+            ->currentAccessToken()
+            ->can('head_crew');
 
-        $isAdminOrManager = $authUser instanceof User
-            && ($authUser->isAdmin() || $authUser->isManager());
+        $isAdminOrManager =
+            $authUser instanceof User
+            && (
+                $authUser->isAdmin()
+                || $authUser->isManager()
+            );
 
         if (! $isHeadCrew && ! $isAdminOrManager) {
             return response()->json([
-                'message' => 'Only Head Crew or Management can check shift submissions.',
+                'message' =>
+                'Only Head Crew or Management can check shift submissions.',
             ], 403);
         }
 
         $validated = $request->validate([
-            'shift_number' => 'required|integer|in:1,2,3',
-            'record_date' => 'required|date',
-            'checked_by' => 'required|string|max:255',
-            'branch_id' => 'nullable|exists:branches,id',
+            'shift_number' =>
+            'required|integer|in:1,2,3',
+
+            'record_date' =>
+            'required|date',
+
+            'checked_by' =>
+            'required|string|max:255',
+
+            'branch_id' =>
+            'nullable|exists:branches,id',
         ]);
 
-        $branchId = $authUser instanceof Branch
+        $branchId =
+            $authUser instanceof Branch
             ? $authUser->id
-            : ($validated['branch_id'] ?? $authUser->branch_id);
+            : (
+                $validated['branch_id']
+                ?? $authUser->branch_id
+            );
 
         if (! $branchId) {
-            return response()->json(['message' => 'branch_id is required.'], 422);
+            return response()->json([
+                'message' =>
+                'branch_id is required.',
+            ], 422);
         }
 
-        $updated = InventoryRecord::where('branch_id', $branchId)
-            ->where('shift_number', $validated['shift_number'])
-            ->where('record_date', $validated['record_date'])
+        $updated =
+            InventoryRecord::where(
+                'branch_id',
+                $branchId
+            )
+            ->where(
+                'shift_number',
+                $validated['shift_number']
+            )
+            ->where(
+                'record_date',
+                $validated['record_date']
+            )
             ->update([
                 'status' => 'checked',
-                'checked_by' => $validated['checked_by'],
+                'checked_by' =>
+                $validated['checked_by'],
                 'checked_at' => now(),
             ]);
 
-        $records = InventoryRecord::with('item')
-            ->where('branch_id', $branchId)
-            ->where('shift_number', $validated['shift_number'])
-            ->where('record_date', $validated['record_date'])
+        $records =
+            InventoryRecord::with('item')
+            ->where(
+                'branch_id',
+                $branchId
+            )
+            ->where(
+                'shift_number',
+                $validated['shift_number']
+            )
+            ->where(
+                'record_date',
+                $validated['record_date']
+            )
             ->get();
 
         return response()->json([
             'branch_id' => $branchId,
-            'shift_number' => $validated['shift_number'],
-            'record_date' => $validated['record_date'],
+
+            'shift_number' =>
+            $validated['shift_number'],
+
+            'record_date' =>
+            $validated['record_date'],
+
             'checked_count' => $updated,
+
             'records' => $records,
-            'shift_total_sales' => round($records->sum('total_sales'), 2),
+
+            'shift_total_sales' =>
+            round(
+                $records->sum('total_sales'),
+                2
+            ),
         ]);
     }
 
-    public function show(InventoryRecord $inventoryRecord)
-    {
-        return response()->json($inventoryRecord->load(['item', 'branch', 'user']));
+    // ============================================================
+    // SHOW ONE RECORD
+    // ============================================================
+
+    public function show(
+        InventoryRecord $inventoryRecord
+    ) {
+        return response()->json(
+            $inventoryRecord->load([
+                'item',
+                'branch',
+                'user',
+            ])
+        );
     }
 
-    public function update(Request $request, InventoryRecord $inventoryRecord)
-    {
+    // ============================================================
+    // NORMAL UPDATE
+    // ============================================================
+
+    public function update(
+        Request $request,
+        InventoryRecord $inventoryRecord
+    ) {
         $validated = $request->validate([
-            'del_qty' => 'nullable|numeric|min:0',
-            'out_qty' => 'nullable|numeric|min:0',
-            'ending_qty' => 'sometimes|required|numeric|min:0',
-            'beginning_qty' => 'nullable|numeric|min:0',
-            'notes' => 'nullable|string',
+            'del_qty' =>
+            'nullable|numeric|min:0',
+
+            'out_qty' =>
+            'nullable|numeric|min:0',
+
+            'ending_qty' =>
+            'sometimes|required|numeric|min:0',
+
+            'beginning_qty' =>
+            'nullable|numeric|min:0',
+
+            'notes' =>
+            'nullable|string',
         ]);
 
         $item = $inventoryRecord->item;
 
         $computed = $this->calculator->calculate([
-            'beginning_qty' => $validated['beginning_qty'] ?? $inventoryRecord->beginning_qty,
-            'del_qty' => $validated['del_qty'] ?? $inventoryRecord->del_qty,
-            'out_qty' => $validated['out_qty'] ?? $inventoryRecord->out_qty,
-            'ending_qty' => $validated['ending_qty'] ?? $inventoryRecord->ending_qty,
+            'beginning_qty' =>
+            $validated['beginning_qty']
+                ?? $inventoryRecord->beginning_qty,
+
+            'del_qty' =>
+            $validated['del_qty']
+                ?? $inventoryRecord->del_qty,
+
+            'out_qty' =>
+            $validated['out_qty']
+                ?? $inventoryRecord->out_qty,
+
+            'ending_qty' =>
+            $validated['ending_qty']
+                ?? $inventoryRecord->ending_qty,
         ], $item);
 
-        $divisibilityError = $this->calculator->validateDivisibility((float) $computed['usage_qty'], $item);
+        $divisibilityError =
+            $this->calculator->validateDivisibility(
+                (float) $computed['usage_qty'],
+                $item
+            );
+
         if ($divisibilityError) {
             return response()->json([
                 'message' => $divisibilityError,
@@ -394,17 +895,35 @@ class InventoryRecordController extends Controller
         }
 
         $inventoryRecord->update([
-            'notes' => $validated['notes'] ?? $inventoryRecord->notes,
+            'notes' =>
+            $validated['notes']
+                ?? $inventoryRecord->notes,
+
             ...$computed,
         ]);
 
-        return response()->json($inventoryRecord->fresh()->load(['item', 'branch', 'user']));
+        return response()->json(
+            $inventoryRecord
+                ->fresh()
+                ->load([
+                    'item',
+                    'branch',
+                    'user',
+                ])
+        );
     }
 
-    public function destroy(InventoryRecord $inventoryRecord)
-    {
+    // ============================================================
+    // DELETE
+    // ============================================================
+
+    public function destroy(
+        InventoryRecord $inventoryRecord
+    ) {
         $inventoryRecord->delete();
 
-        return response()->json(['message' => 'Record deleted.']);
+        return response()->json([
+            'message' => 'Record deleted.',
+        ]);
     }
 }
